@@ -366,9 +366,19 @@ function aiUpdate(p, dt) {
   p.aiT -= dt; if (p.cutting > 0) p.cutting -= dt;
   const offense = S.poss === team.idx && (B.state === 'held' || B.state === 'pass');
   p.lookX = offense ? H.x : B.pos.x; p.lookZ = offense ? 0 : B.pos.z;
+  if (B.shot && B.shot.scored && !B.owner && !B.pass && S.mode === 'play') return aiAfterMake(p, dt);
   if (B.state === 'loose' || B.state === 'shot' || (!B.owner && B.state !== 'pass')) return aiLoose(p, dt);
   if (offense) return B.owner === p ? aiHandler(p, dt) : aiOffBall(p, dt);
   return aiDefense(p, dt);
+}
+// right after a make (Play Now): the scorers sprint back on defense, the nearest free man on the other team fetches the ball
+// under the net for the inbound, and everyone else on that team leaks out to their spots, so nobody stands at the rim
+function aiAfterMake(p, dt) {
+  const sc = B.shot.team, H = hoopOf(sc);
+  if (p.team === sc) { const k = sc.players.indexOf(p), D = hoopOf(opp(sc)); moveTo(p, D.x - D.dir * (3.2 + (k % 3) * 2.1), (k - (S.n - 1) / 2) * 1.8, true); p.lookX = B.pos.x; p.lookZ = B.pos.z; return; }
+  let fetch = null, bd = 1e9; for (const q of p.team.players) { if (q.ctrl) continue; const d = d2(q.x, q.z, H.x, 0); if (d < bd) { bd = d; fetch = q; } }
+  if (p === fetch) { moveTo(p, H.x + H.dir * 1.1, B.pos.z > 0 ? 1.4 : -1.4, true); p.lookX = B.pos.x; p.lookZ = B.pos.z; return; }
+  aiOffBall(p, dt);
 }
 function aiOffBall(p, dt) {
   const team = p.team, H = hoopOf(team), dir = H.dir, hand = B.owner || (B.pass && B.pass.tgt);

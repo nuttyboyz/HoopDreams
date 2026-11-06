@@ -185,7 +185,7 @@ function inbUpdate(dt) {
   I.t += dt; ib.hold = 0.25; ib.wx = ib.wz = 0; ib.vx = ib.vz = 0;
   if (!rc.ctrl) moveTo(rc, I.rx, I.rz, false);
   ib.face = Math.atan2(rc.x - ib.x, rc.z - ib.z);
-  const ready = ib.ctrl ? I.t > 4 : rc.ctrl ? I.t > 0.9 : I.t > 0.75 && (d2(rc.x, rc.z, I.rx, I.rz) < 1.6 || I.t > 1.8);
+  const ready = ib.ctrl ? I.t > 4 : rc.ctrl ? I.t > 0.6 : I.t > 0.5 && (d2(rc.x, rc.z, I.rx, I.rz) < 2.2 || I.t > 1.3);
   if (!ready) return;
   let tgt = rc; if (laneClear(ib, rc) < 0.45) { const alt = pickPassAI(ib); if (alt) tgt = alt; }
   if (doPass(ib, tgt, laneClear(ib, tgt) < 0.7 ? 'bounce' : 'chest')) B.pass.inb = true;
@@ -215,7 +215,7 @@ function scoreBasket(shot, h) {
     Com.say('ftmake', p.short, 1, 6000); return;
   }
   p.stats.fg++; if (shot.three) p.stats.tp++; if (shot.dunk) p.stats.dk++;
-  h.netT = 0.5; S.lastScorer = p; S.dead = shot.dunk || shot.three ? 1.25 : 1.0; B.lock = 99; S.live = true; // a beat to enjoy a big one, then inbound
+  h.netT = 0.5; S.lastScorer = p; S.dead = shot.dunk || shot.three ? 0.95 : 0.7; B.lock = 99; S.live = true; // a beat to enjoy a big one, then inbound
   Snd.swish(); if (!shot.dunk) Snd.cheer(shot.three ? 1.2 : 0.8, shot.three ? 3 : 2.2);
   if (!shot.dunk && !shot.layup && !shot.touched) Com.say('swish', p.short, 1, 9000);
   // heat: three makes in a row = ON FIRE = the next shot is guaranteed, then everything resets and builds up again
