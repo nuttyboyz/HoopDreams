@@ -38,6 +38,7 @@ function update(rawDt) {
   else {
     for (const h of S.humans) humanUpdate(h, dt);
     for (const p of S.players) { if (p.hold > 0) { p.wx = p.wz = 0; } if (!p.ctrl) aiUpdate(p, dt); }
+    inbUpdate(dt);
     for (const p of S.players) movePlayer(p, dt);
   }
   // separation
@@ -55,10 +56,10 @@ function update(rawDt) {
       if (S.dead <= 0) { if (S.finish) { S.finish = false; gameOver(); } else if (S.mode === 'play' && S.clock <= 0) endPeriod(); else afterScore(); }
     } else {
       if (S.mode === 'play') {
-        if (B.state !== 'dead' && !S.ft && S.deadT <= 0) S.clock -= dt; // the clock stops for free throws and whistles
+        if (B.state !== 'dead' && !S.ft && S.deadT <= 0 && !S.inb) S.clock -= dt; // the clock stops for free throws and whistles
         const inFlight = B.state === 'shot' && B.shot && !B.shot.scored;
         if (S.clock <= 0 && !inFlight) { S.clock = 0; endPeriod(); }
-        else if ((B.state === 'held' || B.state === 'pass') && !S.ft) {
+        else if ((B.state === 'held' || B.state === 'pass') && !S.ft && !S.inb) {
           S.shotClock -= dt;
           if (S.shotClock <= 0) { S.shotClock = 24; Snd.buzzer(); const t = opp(S.teams[S.poss]); const px = B.pos.x, side = B.pos.z > 0 ? HALF_W - 0.3 : -HALF_W + 0.3; B.owner = null; B.pass = null; turnoverTo(t, px, side, 'SHOT CLOCK'); Com.say('clock', '', 1, 8000); }
         }
@@ -392,7 +393,7 @@ function quitToMenu() {
   disposeMatch(); S.state = 'menu'; S.live = false; B.state = 'dead'; $('hud').classList.add('hidden'); for (const e of $('hud').querySelectorAll('.mtr,.mtt,.icon')) e.remove();
   gymStop(); buildArena('play', TEAMS[CFG.t0], TEAMS[CFG.t1]); S.hoops = hoops; S.mode = 'play'; if (typeof fxMode === 'function') fxMode('play'); if (REF) REF.m.root.visible = REF.shadow.visible = false; showMenu('title');
 }
-function setQuality(q) { CFG.quality = q; GFX.lite = 0; GFX.off = 0; if (q === 0 && GFX.floorMat) GFX.floorMat.uniforms.kRef.value = 0; gfxLightRig(GFX.mode); if (GFX.shPlane) GFX.shPlane.visible = !!q; PR_MAX = q ? Math.min(window.devicePixelRatio || 1, 1.5) : 1; PR = Math.min(PR, PR_MAX); if (q) PR = PR_MAX; renderer.setPixelRatio(PR); resize(); }
+function setQuality(q) { CFG.quality = q; GFX.lite = 0; GFX.off = 0; if (q === 0 && GFX.floorMat) GFX.floorMat.uniforms.kRef.value = 0; gfxLightRig(GFX.mode); if (GFX.shPlane) GFX.shPlane.visible = !!q; PR_MAX = q ? Math.min(window.devicePixelRatio || 1, 1.5) : 1; prCap = 9; PR = Math.min(PR, PR_MAX); if (q) PR = PR_MAX; renderer.setPixelRatio(PR); resize(); }
 function controlsHtml() {
   const row = (g, t) => '<dt>' + g + '</dt><dd>' + t + '</dd>';
   const K = x => '<span class="k kb">' + x + '</span>';
@@ -536,13 +537,14 @@ function ballSpin(dt) {
   else if (sp > 0.15) { _bsa.set(B.vel.z / sp, 0, -B.vel.x / sp); w = B.pos.y < BALL_R + 0.03 ? sp / BALL_R : (B.state === 'shot' ? -9 : -3); }
   if (w) ballMesh.quaternion.premultiply(_bsq.setFromAxisAngle(_bsa, w * dt));
 }
-let lastT = performance.now(), ema = 0.016, slowF = 0, fastF = 0, attractA = 0;
+let lastT = performance.now(), ema = 0.016, slowF = 0, fastF = 0, attractA = 0, prUpT = -1e9, prCap = 9;
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = Math.min(0.05, Math.max(0.0005, (now - lastT) / 1000)); lastT = now;
   ema = lerp(ema, raw, 0.05);
-  if (ema > 0.026 && PR > 0.6) { if (++slowF > 60) { slowF = 0; PR = Math.max(0.6, PR * 0.85); renderer.setPixelRatio(PR); resize(); } } else slowF = 0;
-  if (ema < 0.0135 && PR < PR_MAX) { if (++fastF > 400) { fastF = 0; PR = Math.min(PR_MAX, PR * 1.12); renderer.setPixelRatio(PR); resize(); } } else fastF = 0;
+  // hold 60fps: below ~55fps for most of a second, render fewer pixels; after 8 smooth seconds try one step sharper, and if that step was too much, never retry it
+  if (ema > 0.0195 && PR > 0.6) { if (++slowF > 45) { slowF = 0; if (now - prUpT < 6000) prCap = PR / 1.12 + 0.001; PR = Math.max(0.6, PR * 0.87); renderer.setPixelRatio(PR); resize(); } } else slowF = 0;
+  if (ema < 0.0172 && PR < Math.min(PR_MAX, prCap)) { if (++fastF > 480) { fastF = 0; PR = Math.min(PR_MAX, prCap, PR * 1.12); prUpT = now; renderer.setPixelRatio(PR); resize(); } } else fastF = 0;
   if (!window.__noPoll) pollInput(raw);
   if (!$('menu').classList.contains('hidden')) menuPad(raw);
   trackFight();

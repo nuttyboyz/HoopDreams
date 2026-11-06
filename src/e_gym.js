@@ -40,7 +40,7 @@ function gymReflect(C, V) {
   mc.lookAt(la); mc.near = C.near; mc.far = C.far; mc.updateMatrixWorld(); mc.projectionMatrix.copy(C.projectionMatrix);
   const tm = m.uniforms.texM.value; tm.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1); tm.multiply(mc.projectionMatrix); tm.multiply(mc.matrixWorldInverse);
   GYM.floor.visible = false; const cur = renderer.getRenderTarget();
-  renderer.clippingPlanes = GYM_CLIP; renderer.setRenderTarget(GYM.rt); renderer.clear(); renderer.render(scene, mc); renderer.setRenderTarget(cur); renderer.clippingPlanes = [];
+  bodyReflect(true); renderer.clippingPlanes = GYM_CLIP; renderer.setRenderTarget(GYM.rt); renderer.clear(); renderer.render(scene, mc); renderer.setRenderTarget(cur); renderer.clippingPlanes = []; bodyReflect(false);
   GYM.floor.visible = true; m.uniforms.tRef.value = GYM.rt.texture; m.uniforms.kRef.value = 1;
 }
 
@@ -490,7 +490,7 @@ function gymRender() {
   if (ls.length === 1) { const V = ls[0].view; gymView(V); gymReflect(V.cam, V); gfxRender(scene, V.cam); return; }
   for (const L of ls) {
     const V = L.view; gymView(V); renderer.setScissorTest(false); gymReflect(V.cam, V);
-    renderer.setViewport(V.x, V.y, V.w, V.h); renderer.setScissor(V.x, V.y, V.w, V.h); renderer.setScissorTest(true); renderer.render(scene, V.cam);
+    renderer.setViewport(V.x, V.y, V.w, V.h); renderer.setScissor(V.x, V.y, V.w, V.h); renderer.setScissorTest(true); bodyLodPass(V.cam, V.h * PR); renderer.render(scene, V.cam);
   }
   renderer.setScissorTest(false); renderer.setViewport(0, 0, W, Hh);
 }

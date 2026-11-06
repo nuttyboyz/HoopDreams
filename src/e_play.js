@@ -190,6 +190,7 @@ function updatePass(dt) {
     if (ps.u < 0.18 || ps.hit.includes(dd) || y > 2.25 || y < 0.15 || d2(dd.x, dd.z, B.pos.x, B.pos.z) > 0.62) continue;
     ps.hit.push(dd);
     let ch = (ps.kind === 'bounce' ? 0.045 : 0.09) + 0.12 * (dd.rat.def - 0.6) + (dd.protect ? 0.05 : 0) + dif(dd) * 0.02;
+    if (ps.inb) ch *= 0.3; // an inbound pass is thrown to the open side
     if (u > 0.7 && d2(dd.x, dd.z, q.x, q.z) < 1.1) ch *= (dd.x - q.x) * (ps.from.x - q.x) > 0 ? 0.6 : 0.2; // the man guarding the catcher only jumps it if he fronts him
     if (Math.random() < ch) { dd.stats.stl++; if (ps.oop && q.act === 'oop') q.act = ''; giveBall(dd, 'steal'); toast('STOLEN'); Com.say('steal', dd.short, 1, 4000); Snd.cheer(0.7, 1.4); return; }
   }
@@ -319,6 +320,7 @@ function humanUpdate(h, dt) {
   if (p.act !== '' || p.stun > 0) return;
   const slot = I.l1 ? (I.xP ? 0 : I.oP ? 1 : I.shootP ? 2 : I.tP ? 3 : -1) : -1; // L1 + a face button = that teammate (the button under him)
   if (!has && slot >= 0) { const t = p.team.players.filter(q => q !== p)[slot]; if (t && !t.ctrl && !t.gymRole) { setCtrl(h, t); return; } } // without the ball it takes control of him
+  if (has && S.inb && S.inb.ib === p) { if (I.xP || I.oP || I.tP || I.shootP || slot >= 0) { if (doPass(p, pickPassHuman(p, I, slot) || S.inb.rc, I.oP ? 'bounce' : I.tP ? 'lob' : 'chest')) B.pass.inb = true; } return; } // inbounding: any pass button passes it in
   if (has) {
     if (I.shootP && slot < 0) tryShoot(p, I);
     else if (slot >= 0) { const t = pickPassHuman(p, I, slot); if (t) doPass(p, t, 'chest'); }
@@ -631,6 +633,7 @@ function animatePlayer(p, dt) {
 /* ---------- ball ---------- */
 function updateBall(dt) {
   if (B.lock > 0 && B.lock < 90) B.lock -= dt; if (B.fireT > 0) B.fireT -= dt;
+  if (B.state === 'held' && B.owner && S.inb && S.inb.ib === B.owner) { const p = B.owner; B.pos.set(p.x + Math.sin(p.face) * 0.32, p.y + 1.22 * p.sc, p.z + Math.cos(p.face) * 0.32); return; } // held in both hands to inbound
   if (B.state === 'held' && B.owner) {
     const p = B.owner, a = p.act, fx = Math.sin(p.face), fz = Math.cos(p.face), hx = Math.cos(p.face), hz = -Math.sin(p.face);
     if (a === 'wind' || a === 'layup' || a === 'dunk' || a === 'oop') {
@@ -713,6 +716,7 @@ function tryPickup() {
   }
   if (best) {
     const wasShot = B.shot; const off = best.team.idx === S.poss;
+    if (wasShot && !wasShot.scored && !wasShot.missed) missShot(wasShot); // a miss rebounded before it lands is still a miss (ends the hot streak)
     giveBall(best, wasShot ? (off ? 'oreb' : 'reb') : (off ? 'pick' : 'steal')); best.jumpT = 0.3;
     if (wasShot && S.mode !== 'gym' && S.mode !== 'shoot') { Com.say('rebound', best.short, 1, 12000); if (!off && S.mode === 'black') {} callOut(best, 'nice'); }
     S.live = true;

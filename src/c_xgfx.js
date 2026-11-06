@@ -10,7 +10,7 @@ const _gx1 = new T.Vector3(), _gx2 = new T.Vector3(), _gxm = new T.Matrix4(), _g
 /* ---------- post chain ---------- */
 const GFX_VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const GFX_BRIGHT = 'uniform sampler2D tD; uniform vec2 px; uniform float thr; varying vec2 vUv;\n' +
-  'vec3 s(vec2 o){ vec3 c = texture2D(tD, vUv + o * px).rgb; float l = max(c.r, max(c.g, c.b)); float k = max(l - thr, 0.0) / max(l, 1e-4); return c * k; }\n' +
+  'vec3 s(vec2 o){ vec3 c = texture2D(tD, vUv + o * px).rgb; float l = max(c.r, max(c.g, c.b)); if (!(l >= 0.0 && l < 60000.0) || !(min(c.r, min(c.g, c.b)) >= 0.0)) return vec3(0.0); float k = max(l - thr, 0.0) / max(l, 1e-4); return c * k; }\n' +
   'void main(){ vec3 c = (s(vec2(-.5,-.5)) + s(vec2(.5,-.5)) + s(vec2(-.5,.5)) + s(vec2(.5,.5))) * .25; gl_FragColor = vec4(min(c, vec3(12.0)), 1.0); }';
 const GFX_BLUR = 'uniform sampler2D tD; uniform vec2 dir; varying vec2 vUv;\n' +
   'void main(){ vec3 c = texture2D(tD, vUv).rgb * .227027; c += (texture2D(tD, vUv + dir * 1.3846).rgb + texture2D(tD, vUv - dir * 1.3846).rgb) * .3162162; c += (texture2D(tD, vUv + dir * 3.2308).rgb + texture2D(tD, vUv - dir * 3.2308).rgb) * .0702703; gl_FragColor = vec4(c, 1.0); }';
@@ -22,7 +22,9 @@ const GFX_COMP = 'uniform sampler2D tS; uniform sampler2D b0; uniform sampler2D 
   ' vec2 c0 = vUv - .5; float rr = dot(c0, c0);\n' +
   ' vec2 ca = c0 * rr * 0.0045;\n' +
   ' vec3 c = vec3(texture2D(tS, vUv + ca).r, texture2D(tS, vUv).g, texture2D(tS, vUv - ca).b);\n' +
+  ' if (!(c.r >= 0.0 && c.r < 60000.0)) c.r = 0.0; if (!(c.g >= 0.0 && c.g < 60000.0)) c.g = 0.0; if (!(c.b >= 0.0 && c.b < 60000.0)) c.b = 0.0;\n' +
   ' vec3 bl = texture2D(b0, vUv).rgb * .42 + texture2D(b1, vUv).rgb * .36 + texture2D(b2, vUv).rgb * .3 + texture2D(b3, vUv).rgb * .26;\n' +
+  ' bl = clamp(bl, 0.0, 16.0);\n' +
   ' c += bl * kB;\n' +
   ' vec3 f = vec3(0.0); vec2 as = vec2(asp, 1.0);\n' +
   ' for (int i = 0; i < 4; i++) { vec3 L = fl[i]; if (L.z > 0.002) {\n' +
@@ -59,7 +61,7 @@ function gfxTargets(w, h) {
   if (GFX.rt) GFX.rt.dispose(); GFX.bl.forEach(t => t.dispose());
   const o = { minFilter: T.LinearFilter, magFilter: T.LinearFilter, format: T.RGBAFormat, type: GFX.hdr ? T.HalfFloatType : T.UnsignedByteType, depthBuffer: true };
   GFX.rt = renderer.capabilities.isWebGL2 ? new T.WebGLMultisampleRenderTarget(w, h, o) : new T.WebGLRenderTarget(w, h, o);
-  if (GFX.rt.samples !== undefined) GFX.rt.samples = 4;
+  if (GFX.rt.samples !== undefined) GFX.rt.samples = PR > 1.2 ? 2 : 4;   // a sharp high-DPI screen needs less multisampling
   GFX.bl = [];
   let bw = w, bh = h;
   for (let i = 0; i < 4; i++) { bw = Math.max(8, bw >> 1); bh = Math.max(8, bh >> 1); const p = { minFilter: T.LinearFilter, magFilter: T.LinearFilter, format: T.RGBAFormat, type: GFX.hdr ? T.HalfFloatType : T.UnsignedByteType, depthBuffer: false };
@@ -73,9 +75,10 @@ function gfxFlares(c) {
   rows.sort((a, b) => b[2] - a[2]); for (let i = 0; i < 4 && i < rows.length; i++) M[i].set(rows[i][0], rows[i][1], rows[i][2]);
 }
 function gfxRender(scn, c) {
+  renderer.getDrawingBufferSize(_gxv); bodyLodPass(c, _gxv.y);
   if (!CFG.quality || GFX.off) { renderer.render(scn, c); return; }
   gfxInitPost();
-  renderer.getDrawingBufferSize(_gxv); const w = Math.max(64, Math.round(_gxv.x)), h = Math.max(64, Math.round(_gxv.y));
+  const w = Math.max(64, Math.round(_gxv.x)), h = Math.max(64, Math.round(_gxv.y));
   gfxTargets(w, h);
   if (S.mode !== 'gym') gfxReflect(c);
   renderer.setRenderTarget(GFX.rt); renderer.render(scn, c);
@@ -113,7 +116,7 @@ function gfxFloor(tex, mode) {
 function gfxReflect(C) {
   const m = GFX.floorMat; if (!m || !GFX.floor || GFX.lite) { if (m) m.uniforms.kRef.value = 0; return; }
   const w = clamp(Math.round(GFX.w * 0.5), 256, 1024), h = clamp(Math.round(GFX.h * 0.5), 144, 640);
-  if (!GFX.rr || GFX.rr.width !== w || GFX.rr.height !== h) { if (GFX.rr) GFX.rr.dispose(); GFX.rr = new T.WebGLRenderTarget(w, h, { minFilter: T.LinearFilter, magFilter: T.LinearFilter, format: T.RGBAFormat, type: T.UnsignedByteType }); }
+  if (!GFX.rr || GFX.rr.width !== w || GFX.rr.height !== h) { if (GFX.rr) GFX.rr.dispose(); GFX.rr = new T.WebGLRenderTarget(w, h, { minFilter: T.LinearFilter, magFilter: T.LinearFilter, format: T.RGBAFormat, type: T.UnsignedByteType }); m.uniforms.kRef.value = 0; }
   if (!GFX.mcam) GFX.mcam = new T.PerspectiveCamera();
   C.updateMatrixWorld(); const mc = GFX.mcam, cp = _gx1.setFromMatrixPosition(C.matrixWorld); if (cp.y <= 0.05) { m.uniforms.kRef.value = 0; return; }
   const rot = _gxm.extractRotation(C.matrixWorld);
@@ -121,7 +124,7 @@ function gfxReflect(C) {
   mc.up.set(0, 1, 0).applyMatrix4(rot); mc.up.y = -mc.up.y; mc.lookAt(la); mc.near = C.near; mc.far = C.far; mc.updateMatrixWorld(); mc.projectionMatrix.copy(C.projectionMatrix);
   const tm = m.uniforms.texM.value; tm.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1); tm.multiply(mc.projectionMatrix); tm.multiply(mc.matrixWorldInverse);
   GFX.floor.visible = false; if (GFX.shPlane) GFX.shPlane.visible = false; const sh = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
-  renderer.clippingPlanes = GFX_CLIP; renderer.setRenderTarget(GFX.rr); renderer.render(scene, mc); renderer.clippingPlanes = [];
+  bodyReflect(true); renderer.clippingPlanes = GFX_CLIP; renderer.setRenderTarget(GFX.rr); renderer.clear(); renderer.render(scene, mc); renderer.clippingPlanes = []; bodyReflect(false);
   renderer.shadowMap.autoUpdate = sh; GFX.floor.visible = true; if (GFX.shPlane) GFX.shPlane.visible = true;
   m.uniforms.tRef.value = GFX.rr.texture; m.uniforms.kRef.value = GFX.mode === 'black' ? 0.55 : 1;
 }
@@ -262,7 +265,7 @@ function gfxArena(mode, tA, tB) {
       for (let i = 0; i < N; i++) { const o = crowd[i % crowd.length], gp = o.geometry.parameters; _gx1.set(rnd(-0.5, 0.5) * gp.width, rnd(-0.45, 0.2) * gp.height, 0.05).applyMatrix4(o.matrixWorld); pos.set([_gx1.x, _gx1.y, _gx1.z], i * 3); ph[i] = rnd(0, 20); fr[i] = rnd(0.25, 0.9); }
       const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('ph', new T.BufferAttribute(ph, 1)); geo.setAttribute('fr', new T.BufferAttribute(fr, 1));
       const mat = new T.ShaderMaterial({ uniforms: { tm: { value: 0 }, sc: { value: 600 } }, transparent: true, depthWrite: false, blending: T.AdditiveBlending, fog: false,
-        vertexShader: 'attribute float ph; attribute float fr; uniform float tm; uniform float sc; varying float vA; void main(){ float s = sin(tm * fr * 3.1 + ph * 7.0); float f = pow(max(s, 0.0), 90.0); vA = f; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = (2.0 + 26.0 * f) * sc / -mv.z * .12; gl_Position = projectionMatrix * mv; }',
+        vertexShader: 'attribute float ph; attribute float fr; uniform float tm; uniform float sc; varying float vA; void main(){ float s = sin(tm * fr * 3.1 + ph * 7.0); float f = pow(max(s, 0.0), 90.0); vA = f; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp((2.0 + 26.0 * f) * sc / max(-mv.z, 0.5) * .12, 0.0, 64.0); gl_Position = projectionMatrix * mv; }',
         fragmentShader: 'varying float vA; void main(){ float d = length(gl_PointCoord - .5) * 2.0; float a = smoothstep(1.0, 0.0, d); gl_FragColor = vec4(vec3(5.0, 4.8, 4.2) * a * vA, a * vA); }' });
       const pts = new T.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 4; arena.add(pts); GFX.sparks = pts;
     }

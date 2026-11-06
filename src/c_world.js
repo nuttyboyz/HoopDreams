@@ -6,7 +6,7 @@ renderer.setPixelRatio(PR);
 const scene = new T.Scene();
 const cam = new T.PerspectiveCamera(36, 16 / 9, 0.5, 260);
 const hemi = new T.HemisphereLight(0xfff6ea, 0x4e5878, 0.9); scene.add(hemi);
-const sun = new T.DirectionalLight(0xffe9c8, 0.85); sun.position.set(8, 22, 10); scene.add(sun);   // warm key light
+const sun = new T.DirectionalLight(0xffe9c8, 0.85); sun.position.set(8, 22, 10); scene.add(sun); sun.shadow.camera.layers.enable(2);   // warm key light
 const fill = new T.DirectionalLight(0xbfd4ff, 0.22); fill.position.set(-10, 12, -8); scene.add(fill); // cool fill from the far side so players have a rim edge
 let arena = null;     // group rebuilt per mode
 let hoops = [];       // {x,dir,rim,net,board,shake,netT}
@@ -301,7 +301,7 @@ const pgeo = new T.BufferGeometry();
 pgeo.setAttribute('position', new T.BufferAttribute(P.pos, 3)); pgeo.setAttribute('color', new T.BufferAttribute(P.col, 4)); pgeo.setAttribute('size', new T.BufferAttribute(P.siz, 1));
 const pmat = new T.ShaderMaterial({
   transparent: true, depthWrite: false, blending: T.AdditiveBlending, uniforms: { sc: { value: 600 } },
-  vertexShader: 'attribute vec4 color; attribute float size; varying vec4 vC; uniform float sc; void main(){ vC=color; vec4 mv=modelViewMatrix*vec4(position,1.); gl_PointSize=size*sc/-mv.z; gl_Position=projectionMatrix*mv; }',
+  vertexShader: 'attribute vec4 color; attribute float size; varying vec4 vC; uniform float sc; void main(){ vC=color; vec4 mv=modelViewMatrix*vec4(position,1.); gl_PointSize=clamp(size*sc/max(-mv.z,.3),0.,96.); gl_Position=projectionMatrix*mv; }',
   fragmentShader: 'varying vec4 vC; void main(){ float d=length(gl_PointCoord-.5)*2.; float a=smoothstep(1.,.0,d); gl_FragColor=vec4(vC.rgb*vC.a*a, a*vC.a); }'
 });
 const points = new T.Points(pgeo, pmat); points.frustumCulled = false; points.renderOrder = 5; scene.add(points);

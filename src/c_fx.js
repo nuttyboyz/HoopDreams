@@ -44,6 +44,7 @@ function fxNetStep(n, dt) {
     n.szv[l] += (-K * 0.6 * n.sz[l] - D * n.szv[l]) * h; n.sz[l] += n.szv[l] * h;
     n.stv[l] += (-K * 1.4 * n.st[l] - D * 1.2 * n.stv[l]) * h; n.st[l] += n.stv[l] * h;
     if (n.b[l] < -0.35) { n.b[l] = -0.35; n.bv[l] = Math.abs(n.bv[l]) * 0.3; }
+    if (!(Math.abs(n.b[l]) + Math.abs(n.sx[l]) + Math.abs(n.sz[l]) + Math.abs(n.st[l]) < 3)) { n.b[l] = n.bv[l] = n.sx[l] = n.sxv[l] = n.sz[l] = n.szv[l] = n.st[l] = n.stv[l] = 0; }
   }
   n.energy = Math.max(0, n.energy - dt); if (n.glow > 0) n.glow = Math.max(0, n.glow - dt * 1.4);
   n.mat.color.setRGB(1, 1 - 0.1 * n.glow, 1 - 0.35 * n.glow); n.mat.opacity = 0.92;
@@ -54,7 +55,7 @@ function fxNetStep(n, dt) {
 function fxBuild() {
   const N = FX.trailN; FX.trailPts = new Float32Array(N * 3); FX.trailCol = new Float32Array(N * 3);
   const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(FX.trailPts, 3)); g.setAttribute('color', new T.BufferAttribute(FX.trailCol, 3));
-  FX.trail = new T.Points(g, new T.PointsMaterial({ map: fxDot, size: 0.34, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false })); FX.trail.frustumCulled = false; FX.trail.visible = false; FX.trail.renderOrder = 4; scene.add(FX.trail); // point sprites, so the streak has body (GL lines are one pixel)
+  FX.trail = new T.Points(g, new T.PointsMaterial({ map: fxDot, size: 0.34, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false })); FX.trail.material.onBeforeCompile = sh => { sh.vertexShader = sh.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n gl_PointSize = min(gl_PointSize, 96.0);'); }; FX.trail.frustumCulled = false; FX.trail.visible = false; FX.trail.renderOrder = 4; scene.add(FX.trail); // point sprites, so the streak has body (GL lines are one pixel)
   FX.glow = new T.Sprite(new T.SpriteMaterial({ map: fxDot, color: 0xffb070, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false })); FX.glow.scale.set(0.9, 0.9, 1); FX.glow.renderOrder = 4; scene.add(FX.glow);
   FX.spot = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: fxDot, color: 0xffd9a0, transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false })); FX.spot.rotation.x = -Math.PI / 2; FX.spot.position.y = 0.015; FX.spot.renderOrder = 2; scene.add(FX.spot);
   // a soft vignette so the floor and the ball read as the focus, not the stands

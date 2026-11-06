@@ -43,7 +43,7 @@ function makePlayer(team, idx, pl) {
     stats: { pts: 0, fg: 0, fga: 0, tp: 0, dk: 0, blk: 0, stl: 0, perf: 0, best: 0, pf: 0, ft: 0, fta: 0 }, fouls: 0, inj: 0, spin: 0, variant: '', end: null, start: null, dur: 1, oopU: 0, relAt: 0 };
 }
 
-function disposeMatch() {
+function disposeMatch() { S.inb = null;
   if (GYM.on) gymStop();
   if (SH.on) shStop();
   for (const p of S.players) { scene.remove(p.m.root); scene.remove(p.shadow); }
@@ -157,10 +157,38 @@ function giveBall(p, reason) {
     if (changed) for (const hu of S.humans) if (hu.team !== p.team) assignDefenders(hu.team);
   }
   // control follows the ball for the nearest human of that team
-  const hs = p.team.humans; if (hs.length && !p.gymRole) { // a gym rebounder is never yours to control
+  const hs = p.team.humans; if (hs.length && !p.gymRole && !(reason === 'inbound' && S.inb && S.inb.ib === p)) { // a gym rebounder is never yours to control; an inbound passer neither (it comes to you)
     if (!hs.some(h => h.p === p)) { let best = null, bd = 1e9; for (const h of hs) { if (h.p && h.p === B.last) continue; const d = d2(h.p.x, h.p.z, p.x, p.z); if (d < bd && !(hs.length > 1 && h.p === B.owner)) { bd = d; best = h; } } if (best) setCtrl2(best, p); }
   }
   if (S.mode === 'black' && S.clear[p.team.idx] && cleared(p.x, p.z, hoopOf(p.team))) S.clear[p.team.idx] = false;
+}
+// Play Now restarts with a real inbound: a player steps out of bounds at the spot, a teammate comes to the ball and it is passed in;
+// both clocks wait until the pass is made (see inbUpdate, called every frame between the brains and the movement)
+function startInbound(team, x, z, why) {
+  const base = Math.abs(x) > HALF_L - 1.2 && Math.abs(z) < HALF_W - 0.9; // under a basket: from the baseline, else from the sideline
+  let ix, iz, rx, rz;
+  if (base) { const sx = Math.sign(x) || -team.atk; ix = sx * (HALF_L + 0.35); iz = clamp(z, -HALF_W + 1.2, HALF_W - 1.2); if (Math.abs(iz) < 1.4) iz = (iz >= 0 ? 1 : -1) * 1.4; rx = ix - sx * 3.6; rz = iz * 0.4; }
+  else { const sz = z >= 0 ? 1 : -1; ix = clamp(x, -HALF_L + 1, HALF_L - 1); iz = sz * (HALF_W + 0.35); rx = clamp(ix + team.atk * 1.2, -HALF_L + 1.5, HALF_L - 1.5); rz = iz - sz * 3.4; }
+  const free = team.players.filter(q => !q.ctrl && !q.gymRole), pool = free.length ? free : team.players;
+  const ib = pool.slice().sort((a, b) => d2(a.x, a.z, ix, iz) - d2(b.x, b.z, ix, iz))[0];
+  const hu = team.humans.map(h => h.p).find(q => q && q !== ib);
+  const rc = hu || (team.players[0] !== ib ? team.players[0] : team.players.filter(q => q !== ib).sort((a, b) => d2(a.x, a.z, rx, rz) - d2(b.x, b.z, rx, rz))[0]);
+  ib.x = ix; ib.z = iz; ib.vx = ib.vz = 0; ib.y = 0; ib.act = ''; ib.stun = 0; ib.reachT = ib.blockT = 0; ib.hold = 99; ib.face = Math.atan2(rx - ix, rz - iz);
+  S.inb = { ib, rc, rx, rz, t: 0 };
+  giveBall(ib, 'inbound'); S.shotClock = 24; if (why) toast(why);
+}
+function inbUpdate(dt) {
+  const I = S.inb; if (!I) return;
+  const ib = I.ib, rc = I.rc;
+  if (B.owner !== ib || S.mode !== 'play' || !S.players.includes(ib) || !S.players.includes(rc)) { ib.hold = Math.min(ib.hold, 0.2); S.inb = null; return; }
+  if (!S.live) return;
+  I.t += dt; ib.hold = 0.25; ib.wx = ib.wz = 0; ib.vx = ib.vz = 0;
+  if (!rc.ctrl) moveTo(rc, I.rx, I.rz, false);
+  ib.face = Math.atan2(rc.x - ib.x, rc.z - ib.z);
+  const ready = ib.ctrl ? I.t > 4 : rc.ctrl ? I.t > 0.9 : I.t > 0.75 && (d2(rc.x, rc.z, I.rx, I.rz) < 1.6 || I.t > 1.8);
+  if (!ready) return;
+  let tgt = rc; if (laneClear(ib, rc) < 0.45) { const alt = pickPassAI(ib); if (alt) tgt = alt; }
+  if (doPass(ib, tgt, laneClear(ib, tgt) < 0.7 ? 'bounce' : 'chest')) B.pass.inb = true;
 }
 function assignDefenders(team) {
   const hs = team.humans; if (!hs.length) return; const used = new Set();
@@ -247,6 +275,7 @@ function gameOver() {
 }
 function turnoverTo(team, x, z, why) {
   // ball dead: give possession to `team` at a spot (sideline / baseline inbound)
+  if (S.mode === 'play' && team.players.length >= 2) return startInbound(team, x, z, why);
   const q = team.players.filter(p => !p.ctrl || true).sort((a, b) => d2(a.x, a.z, x, z) - d2(b.x, b.z, x, z))[0];
   const lx = S.mode === 'black' ? clamp(x, 0.4, HALF_L - 0.3) : clamp(x, -HALF_L + 0.3, HALF_L - 0.3);
   q.x = lx; q.z = clamp(z, -HALF_W + 0.3, HALF_W - 0.3); q.vx = q.vz = 0; q.y = 0; q.act = ''; q.hold = 0.7;

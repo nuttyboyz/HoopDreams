@@ -1,7 +1,7 @@
 /* ---- realistic athletes (v24): a MakeHuman (CC0) human body, baked by tools/bake_body.py into c_bodydata.js,
    skinned to the game's existing rig (body, torso, head, arms, elbows, legs, knees), so every animation still drives it.
    Jersey, shorts and sneakers are real garment shells over the skin; hair and beards are shells grown from the scalp. ---- */
-const BODY = { ok: null, H: null, bin: null, geo: {}, hairCache: {} };
+const BODY = { ok: null, H: null, bin: null, geo: {}, hairCache: {}, lod: null, live: [], far: 0 };
 function bodyInit() {
   if (BODY.ok !== null) return BODY.ok;
   try {
@@ -33,17 +33,30 @@ function bodyGeo(vn) {
   const wl = new Uint16Array(b, H.weld, n), nr = g.attributes.normal.array, acc = new Float32Array(H.nweld * 3);
   for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) acc[wl[i] * 3 + k] += nr[i * 3 + k];
   for (let i = 0; i < n; i++) { const w = wl[i] * 3, l = Math.hypot(acc[w], acc[w + 1], acc[w + 2]) || 1; for (let k = 0; k < 3; k++) nr[i * 3 + k] = acc[w + k] / l; }
-  // face morphs: every player gets his own nose, lips, jaw, cheeks and head shape
-  const mU = new Int16Array(b, H.mU, n), mD = new Int8Array(b, H.mD, H.nM * H.nU * 3);
-  g.morphAttributes.position = []; g.morphTargetsRelative = true;
-  for (let k = 0; k < H.nM; k++) {
-    const a = new Float32Array(n * 3), sc = H.mS[k] / 127, o = k * H.nU * 3;
-    for (let i = 0; i < n; i++) { const u = mU[i]; if (u >= 0) for (let c = 0; c < 3; c++) a[i * 3 + c] = mD[o + u * 3 + c] * sc; }
-    g.morphAttributes.position.push(new T.BufferAttribute(a, 3));
-  }
+  // face morphs (nose, lips, jaw, cheeks, head shape) are baked into each player's own copy of the positions, see bodyGeoP
   g.boundingSphere = new T.Sphere(new T.Vector3(0, 1.0, 0), 1.6);
   return BODY.geo[vn] = g;
 }
+// one player's body: shares every attribute with the variant except the positions, which carry his face morphs; plus the low-detail twin
+function bodyGeoP(vn, mi) {
+  const H = BODY.H, b = BODY.bin, n = H.n, g0 = bodyGeo(vn), pos = g0.attributes.position.array.slice();
+  const mU = new Int16Array(b, H.mU, n), mD = new Int8Array(b, H.mD, H.nM * H.nU * 3);
+  for (let k = 0; k < H.nM; k++) { const w = mi[k]; if (!w) continue; const sc = H.mS[k] / 127 * w, o = k * H.nU * 3;
+    for (let i = 0; i < n; i++) { const u = mU[i]; if (u >= 0) { const j = o + u * 3; pos[i * 3] += mD[j] * sc; pos[i * 3 + 1] += mD[j + 1] * sc; pos[i * 3 + 2] += mD[j + 2] * sc; } } }
+  const mk = idx => { const g = new T.BufferGeometry(); for (const k in g0.attributes) g.setAttribute(k, g0.attributes[k]); g.setAttribute('position', P); g.setIndex(idx); g.boundingSphere = new T.Sphere(new T.Vector3(0, 1.3, 0), 2.6); return g; };
+  const P = new T.BufferAttribute(pos, 3);
+  if (!BODY.lod && typeof BODY_LOD_B64 !== 'undefined') { const s = atob(BODY_LOD_B64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); BODY.lod = new T.BufferAttribute(new Uint16Array(u.buffer), 1); }
+  return [mk(g0.index), BODY.lod ? mk(BODY.lod) : null];
+}
+// far players draw the low-detail body; shadows and the floor reflection always use it (it lives on layer 2, which the sun's shadow camera sees)
+function bodyLive() { const L = BODY.live; for (let i = L.length - 1; i >= 0; i--) { let o = L[i].root; while (o.parent) o = o.parent; if (o !== scene) L.splice(i, 1); } return L; }
+function bodyLodPass(c, hpx) {
+  const L = bodyLive(), k = hpx / (2 * Math.tan(c.fov * Math.PI / 360));
+  for (const e of L) { e.root.getWorldPosition(_bdv); const d = Math.max(0.1, _bdv.distanceTo(c.position)), px = e.hgt * k / d, far = e.far ? px < 250 : px < 210;
+    if (far !== e.far) { e.far = far; e.full.visible = !far; if (far) e.lod.layers.enable(0); else e.lod.layers.disable(0); } }
+}
+function bodyReflect(on) { for (const e of BODY.live) { e.full.visible = on ? false : !e.far; if (on) e.lod.layers.enable(0); else if (!e.far) e.lod.layers.disable(0); } }
+const _bdv = new T.Vector3();
 const BODY_VS = [
   ['#include <common>', '#include <common>\nattribute float rg; attribute vec4 fx; varying float vRg; varying vec4 vFx; varying vec3 vB;'],
   ['#include <begin_vertex>', '#include <begin_vertex>\nvRg = rg; vFx = fx; vB = position;'],
@@ -97,7 +110,7 @@ float bRough = 0.6; float bSkin = 0.0;`],
   ['#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (bSkin > 0.5) totalEmissiveRadiance += diffuseColor.rgb * vec3(0.16, 0.07, 0.04);'],
 ];
 function bodyMaterial(o, vn, J) {
-  const m = new T.MeshStandardMaterial({ skinning: true, morphTargets: true, side: T.DoubleSide, roughness: 0.6, metalness: 0 });
+  const m = new T.MeshStandardMaterial({ skinning: true, side: T.DoubleSide, roughness: 0.6, metalness: 0 });
   const col = h => new T.Color(h);
   const skin = o.skinC !== undefined ? o.skinC : SKIN[o.skin] || SKIN[2], ex = (o.extra || '').split(' '), has = k => ex.includes(k);
   const trim = o.numColor !== undefined ? o.numColor : 0xffffff;
@@ -115,7 +128,7 @@ function bodyMaterial(o, vn, J) {
     for (const [a, b] of BODY_VS) sh.vertexShader = sh.vertexShader.replace(a, b);
     for (const [a, b] of BODY_FS) sh.fragmentShader = sh.fragmentShader.replace(a, b);
   };
-  m.customProgramCacheKey = () => 'hdbody3';
+  m.customProgramCacheKey = () => 'hdbody4';
   return m;
 }
 // hair / beard / headband shells grown from the scalp of this body variant, in head-local space
@@ -184,16 +197,16 @@ function buildAthlete(o) {
   const R = { root, body, torso, head, armL, armR, elbL, elbR, legL, legR, kneeL, kneeR };
   root.updateMatrixWorld(true);
   const mat = bodyMaterial(o, vn, J);
-  const mesh = new T.SkinnedMesh(bodyGeo(vn), mat);
-  mesh.castShadow = mesh.receiveShadow = true; mesh.frustumCulled = false;
   const ex = (o.extra || '').split(' '), has = k => ex.includes(k), hr = o.hair || 'short';
   let seed = 7; for (const ch of String(o.short || '') + (o.num === undefined ? '' : o.num) + o.hgt) seed = (seed * 31 + ch.charCodeAt(0)) % 2147483647;
   let rs = seed || 3; const rr = () => (rs = (rs * 16807) % 2147483647) / 2147483647 * 2 - 1;
   const mi = Array.from({ length: BODY.H.nM }, (_, k) => rr() * (k === 7 ? 0.35 : k === 6 ? 0.55 : 0.75));
-  mesh.morphTargetInfluences = mi;
+  const [gF, gL] = bodyGeoP(vn, mi), mesh = new T.SkinnedMesh(gF, mat);
+  mesh.receiveShadow = true; mesh.castShadow = !gL;
   root.add(mesh);
   const skel = new T.Skeleton(BODY_RIG.map(k => R[k]));
   mesh.bind(skel, mesh.matrixWorld);
+  if (gL) { const lod = new T.SkinnedMesh(gL, mat); lod.castShadow = lod.receiveShadow = true; lod.layers.set(2); root.add(lod); lod.bind(skel, mesh.matrixWorld); BODY.live.push({ root, full: mesh, lod, hgt: o.hgt, far: false }); }
   // head centre group for hats, braids and other props sized for the old head sphere
   const hc = new T.Group(); hc.position.set(0, 0.065, 0.015); hc.scale.set(0.86, 0.98, 0.98); head.add(hc);
   const hairC = o.hairC === undefined ? 0x1c1410 : o.hairC;
